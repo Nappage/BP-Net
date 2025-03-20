@@ -267,11 +267,12 @@ class CSPN(nn.Module):
     implementation of CSPN++
     """
 
-    def __init__(self, in_channels, pt, norm_layer=nn.BatchNorm2d, act=nn.ReLU, eps=1e-6, kernel_size=3):
+    def __init__(self, in_channels, pt, norm_layer=nn.BatchNorm2d, act=nn.ReLU, eps=1e-6):
         super().__init__()
         self.pt = pt
-        self.kernel_size = kernel_size
-        self.weight = GenKernel(in_channels, kernel_size, norm_layer=norm_layer, act=act, eps=eps)
+        self.weight3x3 = GenKernel(in_channels, 3, norm_layer=norm_layer, act=act, eps=eps)
+        self.weight5x5 = GenKernel(in_channels, 5, norm_layer=norm_layer, act=act, eps=eps)
+        self.weight7x7 = GenKernel(in_channels, 7, norm_layer=norm_layer, act=act, eps=eps)
         self.convmask = nn.Sequential(
             Basic2d(in_channels, in_channels, norm_layer=norm_layer, act=act),
             Basic2d(in_channels, 3, norm_layer=None, act=nn.Sigmoid),
@@ -287,15 +288,20 @@ class CSPN(nn.Module):
 
     @custom_fwd(cast_inputs=torch.float32)
     def forward(self, fout, hn, h0):
-        weight = self.weight(fout)
-        mask, conf = torch.split(self.convmask(fout) * (h0 > 1e-3).float(), 1, dim=1)
-        hn = hn
+        weight3x3 = self.weight3x3(fout)
+        weight5x5 = self.weight5x5(fout)
+        weight7x7 = self.weight7x7(fout)
+        mask3x3, mask5x5, mask7x7 = torch.split(self.convmask(fout) * (h0 > 1e-3).float(), 1, dim=1)
+        conf3x3, conf5x5, conf7x7 = torch.split(self.convck(fout), 1, dim=1)
+        hn3x3 = hn5x5 = hn7x7 = hn
         hns = [hn, ]
         for i in range(self.pt):
-            hn = (1. - mask) * bpconvlocal(hn, weight) + mask * h0
+            hn3x3 = (1. - mask3x3) * bpconvlocal(hn3x3, weight3x3) + mask3x3 * h0
+            hn5x5 = (1. - mask5x5) * bpconvlocal(hn5x5, weight5x5) + mask5x5 * h0
+            hn7x7 = (1. - mask7x7) * bpconvlocal(hn7x7, weight7x7) + mask7x7 * h0
             if i == self.pt // 2 - 1:
-                hns.append(conf * hn)
-        hns.append(conf * hn)
+                hns.append(conf3x3 * hn3x3 + conf5x5 * hn5x5 + conf7x7 * hn7x7)
+        hns.append(conf3x3 * hn3x3 + conf5x5 * hn5x5 + conf7x7 * hn7x7)
         hns = torch.cat(hns, dim=1)
         wt = self.convct(torch.cat([fout, hns], dim=1))
         hn = torch.sum(wt * hns, dim=1, keepdim=True)
