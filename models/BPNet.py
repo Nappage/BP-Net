@@ -21,13 +21,16 @@ class Net(nn.Module):
     """
 
     def __init__(self, block=BasicBlock, bc=16, img_layers=[2, 2, 2, 2, 2, 2],
-                 drop_path=0.1, norm_layer=nn.BatchNorm2d, padding_mode='zeros', drift=1e6):
+                 drop_path=0.1, norm_layer=nn.BatchNorm2d, padding_mode='zeros', drift=1e6,
+                 cspn_iterations=12, cspn_kernel_size=3):
         super().__init__()
         self.drift = drift
         self._norm_layer = norm_layer
         self._padding_mode = padding_mode
         self._img_dpc = 0
         self._img_dprs = np.linspace(0, drop_path, sum(img_layers))
+        self.cspn_iterations = cspn_iterations
+        self.cspn_kernel_size = cspn_kernel_size
 
         self.inplanes = bc * 2
         self.conv_img = nn.Sequential(
@@ -49,12 +52,18 @@ class Net(nn.Module):
         self.inplanes = bc * 16
         self.layer5_img = self._make_layer(block, bc * 16, img_layers[5], stride=2)
 
-        self.pred0 = PMP(level=0, in_ch=bc * 4, out_ch=bc * 2, drop_path=drop_path, pool=False)
-        self.pred1 = PMP(level=1, in_ch=bc * 8, out_ch=bc * 4, drop_path=drop_path)
-        self.pred2 = PMP(level=2, in_ch=bc * 16, out_ch=bc * 8, drop_path=drop_path)
-        self.pred3 = PMP(level=3, in_ch=bc * 16, out_ch=bc * 16, drop_path=drop_path)
-        self.pred4 = PMP(level=4, in_ch=bc * 16, out_ch=bc * 16, drop_path=drop_path)
-        self.pred5 = PMP(level=5, in_ch=bc * 16, out_ch=bc * 16, drop_path=drop_path, up=False)
+        self.pred0 = PMP(level=0, in_ch=bc * 4, out_ch=bc * 2, drop_path=drop_path, pool=False,
+                         cspn_iterations=self.cspn_iterations, cspn_kernel_size=self.cspn_kernel_size)
+        self.pred1 = PMP(level=1, in_ch=bc * 8, out_ch=bc * 4, drop_path=drop_path,
+                         cspn_iterations=self.cspn_iterations, cspn_kernel_size=self.cspn_kernel_size)
+        self.pred2 = PMP(level=2, in_ch=bc * 16, out_ch=bc * 8, drop_path=drop_path,
+                         cspn_iterations=self.cspn_iterations, cspn_kernel_size=self.cspn_kernel_size)
+        self.pred3 = PMP(level=3, in_ch=bc * 16, out_ch=bc * 16, drop_path=drop_path,
+                         cspn_iterations=self.cspn_iterations, cspn_kernel_size=self.cspn_kernel_size)
+        self.pred4 = PMP(level=4, in_ch=bc * 16, out_ch=bc * 16, drop_path=drop_path,
+                         cspn_iterations=self.cspn_iterations, cspn_kernel_size=self.cspn_kernel_size)
+        self.pred5 = PMP(level=5, in_ch=bc * 16, out_ch=bc * 16, drop_path=drop_path, up=False,
+                         cspn_iterations=self.cspn_iterations, cspn_kernel_size=self.cspn_kernel_size)
 
     def forward(self, I, S, K):
         """
@@ -118,11 +127,11 @@ class Net(nn.Module):
         return nn.Sequential(*layers)
 
 
-def Pre_MF_Post():
+def Pre_MF_Post(cspn_iterations=12, cspn_kernel_size=3):
     """
     Pre.+MF.+Post.
     """
-    net = Net()
+    net = Net(cspn_iterations=cspn_iterations, cspn_kernel_size=cspn_kernel_size)
     net.apply(functools.partial(weights_init, mode='trunc'))
     for m in net.modules():
         if isinstance(m, GenKernel) and m.conv[1].conv.bn.weight is not None:
